@@ -174,7 +174,7 @@
   const stateBounds = {}; states.features.forEach(f => { stateBounds[f.properties.code] = d3.geoBounds(f); });
 
   // ---------- state ----------
-  const S = { k: 7, layer: "count", view: "geo", globe: false, state: null, hover: null };
+  const S = { k: 7, layer: "count", view: "geo", globe: false, state: null, county: null, hover: null };
   const cum = (days, k) => days.slice(0, k).reduce((a,b)=>a+b, 0);
   const stateTotals = () => { const t = {}; for (const p of countyPoints) t[p.state] = (t[p.state]||0) + cum(p.days, S.k); return t; };
   const quantiles = vals => { const v = vals.filter(x=>x>0).sort((a,b)=>a-b); if (!v.length) return [0,0,0,0]; return [0.2,0.4,0.6,0.8].map(q => v[Math.min(v.length-1, Math.floor(q*v.length))]); };
@@ -216,6 +216,7 @@
       stroked: true, getLineColor: d => d.n >= 5 ? [255,255,255,220] : [15,23,42,160], getLineWidth: d => d.n >= 5 ? 2 : 1, lineWidthUnits: "pixels",
       updateTriggers: { getFillColor: [S.k, S.layer], getRadius: [S.k], getLineColor: [S.k] },
       onHover: ({object, x, y}) => hoverCard(object ? { kind: "county", ...object } : null, x, y),
+      onClick: ({object}) => object && selectCounty(object.geoid),
     });
     return [stateLayer, countyLayer, pointLayer];
   }
@@ -232,6 +233,7 @@
     document.getElementById("hudBack").style.display = S.state ? "" : "none";
     renderLegend(quantiles(Object.values(totals)));
     if (S.view === "tiles") renderTiles(totals, quantiles(Object.values(totals)));
+    writeHash();
   }
 
   function renderLegend(th) {
@@ -265,14 +267,40 @@
     const w = document.getElementById("mapwrap"); el.style.left = Math.min(x + 14, w.clientWidth - 280) + "px"; el.style.top = Math.min(y + 14, w.clientHeight - 120) + "px";
   }
 
-  function selectState(code) {
-    S.state = code || null;
-    if (code) { const [[w,s],[e,n]] = stateBounds[code]; map.fitBounds([[w,s],[e,n]], { padding: 60, duration: 900, maxZoom: 8 }); }
-    else map.flyTo({ center: [-96,38.5], zoom: 3.6, duration: 900 });
+  // ---------- shareable URL state: #state=KS&county=20091&view=geo&globe=1&days=3&layer=cat ----------
+  function writeHash() {
+    const p = new URLSearchParams();
+    if (S.state) p.set("state", S.state);
+    if (S.county) p.set("county", S.county);
+    if (S.view !== "geo") p.set("view", S.view);
+    if (S.globe) p.set("globe", "1");
+    if (S.k !== 7) p.set("days", S.k);
+    if (S.layer !== "count") p.set("layer", S.layer);
+    const h = p.toString(); lastWritten = h ? "#" + h : ""; history.replaceState(null, "", h ? "#" + h : location.pathname + location.search);
+  }
+  function readHash() {
+    const p = new URLSearchParams(location.hash.replace(/^#/, ""));
+    const st = (p.get("state") || "").toUpperCase(); const county = p.get("county") || "";
+    const k = parseInt(p.get("days") || "7", 10);
+    return { state: FIPS[st] ? st : null, county: byGeoid.has(county) ? county : null, view: p.get("view") === "tiles" ? "tiles" : "geo",
+             globe: p.get("globe") === "1", k: k >= 1 && k <= 7 ? k : 7, layer: p.get("layer") === "cat" ? "cat" : "count" };
+  }
+  function selectState(code, opts = {}) {
+    S.state = code || null; S.county = null;
+    if (code) { const [[w,s],[e,n]] = stateBounds[code]; map.fitBounds([[w,s],[e,n]], { padding: 60, duration: opts.instant ? 0 : 900, maxZoom: 8 }); }
+    else map.flyTo({ center: [-96,38.5], zoom: 3.6, duration: opts.instant ? 0 : 900 });
     render();
   }
+  function selectCounty(geoid, opts = {}) {
+    const p = countyPoints.find(x => x.geoid === geoid); if (!p) return;
+    if (S.state !== p.state) selectState(p.state, opts);
+    S.county = geoid;
+    const fly = () => map.flyTo({ center: p.pos, zoom: 7.5, duration: opts.instant ? 0 : 900 });
+    opts.instant ? fly() : setTimeout(fly, 950);
+    writeHash();
+  }
   function setView(v) { S.view = v; document.getElementById("tiles").classList.toggle("on", v === "tiles"); document.getElementById("hudGeo").classList.toggle("on", v === "geo"); document.getElementById("hudTiles").classList.toggle("on", v === "tiles"); render(); }
-  function setGlobe(on) { S.globe = on; map.setProjection({ type: on ? "globe" : "mercator" }); document.getElementById("hudGlobe").classList.toggle("on", on); if (on) map.flyTo({ center: [-96,38.5], zoom: 1.8, duration: 1200 }); else map.flyTo({ center: [-96,38.5], zoom: 3.6, duration: 1200 }); }
+  function setGlobe(on, opts = {}) { S.globe = on; map.setProjection({ type: on ? "globe" : "mercator" }); document.getElementById("hudGlobe").classList.toggle("on", on); const d = opts.instant ? 0 : 1200; if (on) map.flyTo({ center: [-96,38.5], zoom: 1.8, duration: d }); else map.flyTo({ center: [-96,38.5], zoom: 3.6, duration: d }); writeHash(); }
 
   document.getElementById("hudGeo").onclick = () => setView("geo");
   document.getElementById("hudTiles").onclick = () => setView("tiles");
@@ -288,7 +316,7 @@
   const topCounty = code => countyPoints.filter(p => p.state === code).map(p => ({...p, n: cum(p.days, S.k)})).sort((a,b)=>b.n-a.n)[0];
   const SCRIPTS = [
     { q: "What's happening in Pennsylvania this week?", run: () => { setView("geo"); if (S.globe) setGlobe(false); selectState("PA"); const t = topCounty("PA"); const n = stateTotals()["PA"]||0; return `Moving the map to <b>Pennsylvania</b>. ${n} alerts in the window; the busiest county is <b>${t.name}</b> with ${t.n}, led by <b>${t.cat||"unclassified"}</b>. Hover a circle for detail. <i>The real agent would cite the records behind this.</i>`; } },
-    { q: "Show me Maricopa County", run: () => { setView("geo"); if (S.globe) setGlobe(false); selectState("AZ"); const p = countyPoints.find(x => x.geoid === "04013"); if (p) setTimeout(() => map.flyTo({ center: p.pos, zoom: 7.5, duration: 900 }), 950); const n = p ? cum(p.days, S.k) : 0; return `Zooming to <b>Maricopa County, Arizona</b>: ${n} alerts in the window${p && p.cat ? `, top category <b>${p.cat}</b>` : ""}.`; } },
+    { q: "Show me Maricopa County", run: () => { setView("geo"); if (S.globe) setGlobe(false); selectCounty("04013"); const p = countyPoints.find(x => x.geoid === "04013"); const n = p ? cum(p.days, S.k) : 0; return `Zooming to <b>Maricopa County, Arizona</b>: ${n} alerts in the window${p && p.cat ? `, top category <b>${p.cat}</b>` : ""}.`; } },
     { q: "Which states are busiest?", run: () => { setView("tiles"); if (S.state) S.state = null; const t = Object.entries(stateTotals()).sort((a,b)=>b[1]-a[1]).slice(0,5); render(); return `Switching to the <b>tile view</b> so every state reads equally. Top five: ` + t.map(([c,n])=>`<b>${c}</b> ${n}`).join(", ") + `.`; } },
     { q: "Only the last three days", run: () => { S.k = 3; document.getElementById("range").value = 3; render(); return `Window set to the <b>first three days</b> of the week (${fmt(DAYS[0])} to ${fmt(DAYS[2])}). Drag the slider to change it.`; } },
     { q: "Zoom out to the globe", run: () => { setView("geo"); selectState(null); setGlobe(true); return `Switching to the <b>globe</b>. Today only US data is loaded; the same component takes world boundaries when international coverage lands.`; } },
@@ -304,7 +332,19 @@
   document.getElementById("askIn").addEventListener("keydown", e => { if (e.key === "Enter") ask(e.target.value); });
   say("s", `Hello. I can move this map. Try a prompt below.`);
 
-  map.on("load", render);
+  function applyHash(opts = {}) {
+    const h = readHash();
+    S.k = h.k; document.getElementById("range").value = h.k;
+    S.layer = h.layer; document.querySelectorAll("[data-layer]").forEach(x => x.classList.toggle("on", x.dataset.layer === h.layer));
+    if (h.view !== S.view) setView(h.view);
+    if (h.globe !== S.globe) setGlobe(h.globe, opts);
+    if (h.county) selectCounty(h.county, opts);
+    else if (h.state !== S.state || S.county) selectState(h.state, opts);
+    render();
+  }
+  map.on("load", () => applyHash({ instant: true }));
+  window.addEventListener("hashchange", () => { if (location.hash !== lastWritten) applyHash(); });
+  let lastWritten = location.hash;
 })().catch(err => { document.body.insertAdjacentHTML("afterbegin", `<pre style="color:#f87171;padding:16px">${err.stack||err}</pre>`); console.error(err); });
 </script>
 </body>

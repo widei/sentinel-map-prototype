@@ -21,3 +21,13 @@ Sentinel alerts for 27 August to 2 September 2026, aggregated to county level. C
 
 Prototype only. Not the production design, not connected to the Sentinel application.
 Built with MapLibre GL JS and deck.gl. Basemap © CARTO © OpenStreetMap contributors.
+
+## Shareable links
+
+The address bar follows the view, so any link opens exactly what you were looking at:
+
+- https://widei.github.io/sentinel-map-prototype/#state=KS opens on Kansas
+- https://widei.github.io/sentinel-map-prototype/#state=KS&county=20091 zooms to Johnson County, Kansas
+- https://widei.github.io/sentinel-map-prototype/#view=tiles opens the tile cartogram
+- https://widei.github.io/sentinel-map-prototype/#globe=1 opens the globe
+- Add `&days=3` to narrow the window, or `&layer=cat` to colour by top category
